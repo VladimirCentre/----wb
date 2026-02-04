@@ -217,6 +217,16 @@
         font-family: "Arial", sans-serif;
         font-size: 12px;
       }
+      .sync-status {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .pin-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+      }
       .sync textarea {
         width: 100%;
         min-height: 64px;
@@ -298,6 +308,11 @@
 
         <div class="sync">
           <strong>Синхронизация</strong>
+          <div class="pin-row">
+            <input id="sync-pin" type="password" inputmode="numeric" pattern="[0-9]*" placeholder="PIN (4-6 цифр)" />
+            <button class="ghost" id="set-pin">Подключить</button>
+          </div>
+          <div class="sync-status" id="sync-status">Автосинхронизация отключена.</div>
           <button class="primary" id="make-sync">Сгенерировать код/ссылку</button>
           <textarea id="sync-output" readonly placeholder="Здесь появится код или ссылка"></textarea>
           <button class="ghost" id="import-sync">Импортировать из кода/ссылки</button>
@@ -328,9 +343,18 @@
         </div>
       </section>
     </main>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
       const STORAGE_KEY = "finance_tracker_v1";
+      const SYNC_META_KEY = "finance_sync_meta_v1";
       const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+      const SUPABASE_URL = "https://jzragiuywauieqvlcpvc.supabase.co";
+      const SUPABASE_ANON_KEY = "sb_publishable_jbdAnqG05XBCLYFk0PxiHQ_3sI9gjLb";
+      const supabase =
+        window.supabase && window.supabase.createClient
+          ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+          : null;
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -362,6 +386,9 @@
       const weekNetEl = document.getElementById("week-net");
       const syncOutput = document.getElementById("sync-output");
       const syncInput = document.getElementById("sync-input");
+      const syncPinInput = document.getElementById("sync-pin");
+      const setPinBtn = document.getElementById("set-pin");
+      const syncStatusEl = document.getElementById("sync-status");
 
       const fmtDateKey = (date) => {
         const y = date.getFullYear();
@@ -410,8 +437,10 @@
       const updateDay = (date, updates) => {
         const day = getDayData(date);
         Object.assign(day, updates);
+        syncState.pendingChanges = true;
         save();
         render();
+        scheduleSyncPush();
       };
 
       const buildCalendarDays = () => {
@@ -629,6 +658,111 @@
         renderWeekTotals();
       };
 
+      const setSyncStatus = (text) => {
+        syncStatusEl.textContent = text;
+      };
+
+      const loadSyncMeta = () => {
+        const raw = localStorage.getItem(SYNC_META_KEY);
+        if (!raw) return null;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      };
+
+      const saveSyncMeta = () => {
+        localStorage.setItem(SYNC_META_KEY, JSON.stringify(syncState));
+      };
+
+      const syncState = {
+        pinHash: null,
+        lastPulledAt: null,
+        lastPushedAt: null,
+        serverUpdatedAt: null,
+        pendingChanges: false,
+      };
+
+      const hashPin = async (pin) => {
+        const data = new TextEncoder().encode(pin);
+        const hash = await crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hash))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+      };
+
+      const loadPinFromMeta = () => {
+        const meta = loadSyncMeta();
+        if (meta && meta.pinHash) {
+          Object.assign(syncState, meta);
+          setSyncStatus("Автосинхронизация активна.");
+          return true;
+        }
+        return false;
+      };
+
+      const pullFromServer = async () => {
+        if (!syncState.pinHash) return;
+        if (!supabase) {
+          setSyncStatus("Синхронизация недоступна в офлайн-режиме.");
+          return;
+        }
+        setSyncStatus("Синхронизация: получаю данные...");
+        const { data, error } = await supabase.rpc("get_sync", {
+          pin_hash: syncState.pinHash,
+        });
+        if (error) {
+          setSyncStatus("Синхронизация: ошибка получения.");
+          return;
+        }
+        if (data && data.length > 0) {
+          const row = data[0];
+          if (!syncState.pendingChanges) {
+            state.days = row.data || {};
+            save();
+            render();
+          }
+          syncState.serverUpdatedAt = row.updated_at;
+          syncState.lastPulledAt = new Date().toISOString();
+          saveSyncMeta();
+          setSyncStatus("Синхронизация: данные обновлены.");
+        } else {
+          setSyncStatus("Синхронизация: данных ещё нет.");
+        }
+      };
+
+      let syncTimer = null;
+      const scheduleSyncPush = () => {
+        if (!syncState.pinHash) return;
+        if (!supabase) return;
+        if (syncTimer) clearTimeout(syncTimer);
+        syncTimer = setTimeout(() => {
+          pushToServer();
+        }, 800);
+      };
+
+      const pushToServer = async () => {
+        if (!syncState.pinHash) return;
+        if (!supabase) return;
+        if (!syncState.pendingChanges) return;
+        setSyncStatus("Синхронизация: отправляю данные...");
+        const { data, error } = await supabase.rpc("put_sync", {
+          pin_hash: syncState.pinHash,
+          payload: state.days,
+        });
+        if (error) {
+          setSyncStatus("Синхронизация: ошибка отправки.");
+          return;
+        }
+        const updatedAt = data && data.length ? data[0].updated_at : null;
+        syncState.serverUpdatedAt = updatedAt;
+        syncState.lastPushedAt = new Date().toISOString();
+        syncState.pendingChanges = false;
+        saveSyncMeta();
+        setSyncStatus("Синхронизация: всё сохранено.");
+      };
+
       document.getElementById("prev-month").addEventListener("click", () => {
         current = new Date(current.getFullYear(), current.getMonth() - 1, 1);
         render();
@@ -705,7 +839,32 @@
 
       load();
       handleHashSync();
+      loadPinFromMeta();
       render();
+
+      if (syncState.pinHash && supabase) {
+        pullFromServer();
+      } else if (!supabase) {
+        setSyncStatus("Оффлайн-режим: синхронизация недоступна.");
+      }
+
+      setPinBtn.addEventListener("click", async () => {
+        const pin = syncPinInput.value.trim();
+        if (!pin || pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
+          setSyncStatus("PIN должен быть 4–6 цифр.");
+          return;
+        }
+        if (!supabase) {
+          setSyncStatus("Синхронизация недоступна в офлайн-режиме.");
+          return;
+        }
+        syncState.pinHash = await hashPin(pin);
+        syncState.pendingChanges = true;
+        saveSyncMeta();
+        setSyncStatus("PIN подключен. Идёт синхронизация...");
+        await pullFromServer();
+        scheduleSyncPush();
+      });
     </script>
   </body>
 </html>
