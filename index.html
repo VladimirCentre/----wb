@@ -282,7 +282,7 @@
           <h2 id="day-title">День</h2>
           <div>
             <label for="gross-input">Заработок за день</label>
-            <input id="gross-input" type="number" step="0.01" />
+            <input id="gross-input" type="text" inputmode="decimal" placeholder="Сумма" />
           </div>
           <div>
             <label>Штрафы</label>
@@ -532,7 +532,7 @@
           month: "long",
           year: "numeric",
         });
-        grossInput.value = dayData.gross.toFixed(2);
+        grossInput.value = dayData.gross ? dayData.gross.toFixed(2) : "";
         penaltiesEl.innerHTML = "";
         returnsEl.innerHTML = "";
 
@@ -725,7 +725,7 @@
         }
         setSyncStatus("Синхронизация: получаю данные...");
         const { data, error } = await supabaseClient.rpc("get_sync", {
-          pin_hash: syncState.pinHash,
+          p_pin_hash: syncState.pinHash,
         });
         if (error) {
           setSyncStatus("Синхронизация: ошибка получения.");
@@ -763,8 +763,8 @@
         if (!syncState.pendingChanges) return;
         setSyncStatus("Синхронизация: отправляю данные...");
         const { data, error } = await supabaseClient.rpc("put_sync", {
-          pin_hash: syncState.pinHash,
-          payload: state.days,
+          p_pin_hash: syncState.pinHash,
+          p_payload: state.days,
         });
         if (error) {
           setSyncStatus("Синхронизация: ошибка отправки.");
@@ -787,9 +787,16 @@
         safeRender();
       });
 
+      const parseMoneyInput = (raw) => {
+        if (!raw) return 0;
+        const cleaned = raw.replace(/\s/g, "").replace(",", ".");
+        const value = parseFloat(cleaned);
+        return isNaN(value) ? 0 : value;
+      };
+
       grossInput.addEventListener("input", () => {
-        const value = parseFloat(grossInput.value || "0");
-        updateDay(selected, { gross: isNaN(value) ? 0 : value });
+        const value = parseMoneyInput(grossInput.value);
+        updateDay(selected, { gross: value });
       });
 
       document.getElementById("add-penalty").addEventListener("click", () => {
