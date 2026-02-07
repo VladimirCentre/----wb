@@ -351,7 +351,7 @@
 
       const SUPABASE_URL = "https://jzragiuywauieqvlcpvc.supabase.co";
       const SUPABASE_ANON_KEY = "sb_publishable_jbdAnqG05XBCLYFk0PxiHQ_3sI9gjLb";
-      const supabase =
+      const supabaseClient =
         window.supabase && window.supabase.createClient
           ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
           : null;
@@ -719,12 +719,12 @@
 
       const pullFromServer = async () => {
         if (!syncState.pinHash) return;
-        if (!supabase) {
+        if (!supabaseClient) {
           setSyncStatus("Синхронизация недоступна в офлайн-режиме.");
           return;
         }
         setSyncStatus("Синхронизация: получаю данные...");
-        const { data, error } = await supabase.rpc("get_sync", {
+        const { data, error } = await supabaseClient.rpc("get_sync", {
           pin_hash: syncState.pinHash,
         });
         if (error) {
@@ -750,7 +750,7 @@
       let syncTimer = null;
       const scheduleSyncPush = () => {
         if (!syncState.pinHash) return;
-        if (!supabase) return;
+        if (!supabaseClient) return;
         if (syncTimer) clearTimeout(syncTimer);
         syncTimer = setTimeout(() => {
           pushToServer();
@@ -759,10 +759,10 @@
 
       const pushToServer = async () => {
         if (!syncState.pinHash) return;
-        if (!supabase) return;
+        if (!supabaseClient) return;
         if (!syncState.pendingChanges) return;
         setSyncStatus("Синхронизация: отправляю данные...");
-        const { data, error } = await supabase.rpc("put_sync", {
+        const { data, error } = await supabaseClient.rpc("put_sync", {
           pin_hash: syncState.pinHash,
           payload: state.days,
         });
@@ -865,9 +865,9 @@
       loadPinFromMeta();
       safeRender();
 
-      if (syncState.pinHash && supabase) {
+      if (syncState.pinHash && supabaseClient) {
         pullFromServer();
-      } else if (!supabase) {
+      } else if (!supabaseClient) {
         setSyncStatus("Оффлайн-режим: синхронизация недоступна.");
       }
 
@@ -877,7 +877,7 @@
           setSyncStatus("PIN должен быть 4–6 цифр.");
           return;
         }
-        if (!supabase) {
+        if (!supabaseClient) {
           setSyncStatus("Синхронизация недоступна в офлайн-режиме.");
           return;
         }
