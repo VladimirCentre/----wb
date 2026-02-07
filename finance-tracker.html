@@ -439,7 +439,7 @@
         Object.assign(day, updates);
         syncState.pendingChanges = true;
         save();
-        render();
+        safeRender();
         scheduleSyncPush();
       };
 
@@ -518,7 +518,7 @@
 
           cell.addEventListener("click", () => {
             selected = new Date(date);
-            render();
+            safeRender();
           });
 
           calendarEl.appendChild(cell);
@@ -648,6 +648,9 @@
       };
 
       const render = () => {
+        if (!calendarEl || !monthTitleEl) {
+          return;
+        }
         monthTitleEl.textContent = current.toLocaleDateString("ru-RU", {
           month: "long",
           year: "numeric",
@@ -656,6 +659,18 @@
         renderEditor();
         renderTotals();
         renderWeekTotals();
+      };
+
+      const safeRender = () => {
+        try {
+          render();
+        } catch (err) {
+          if (calendarEl) {
+            calendarEl.innerHTML =
+              '<div class="day" style="grid-column: 1 / -1; text-align: center;">Ошибка рендера календаря. Обнови страницу.</div>';
+          }
+          console.error("Render error:", err);
+        }
       };
 
       const setSyncStatus = (text) => {
@@ -721,7 +736,7 @@
           if (!syncState.pendingChanges) {
             state.days = row.data || {};
             save();
-            render();
+            safeRender();
           }
           syncState.serverUpdatedAt = row.updated_at;
           syncState.lastPulledAt = new Date().toISOString();
@@ -765,11 +780,11 @@
 
       document.getElementById("prev-month").addEventListener("click", () => {
         current = new Date(current.getFullYear(), current.getMonth() - 1, 1);
-        render();
+        safeRender();
       });
       document.getElementById("next-month").addEventListener("click", () => {
         current = new Date(current.getFullYear(), current.getMonth() + 1, 1);
-        render();
+        safeRender();
       });
 
       grossInput.addEventListener("input", () => {
@@ -824,7 +839,7 @@
           const parsed = JSON.parse(json);
           state.days = parsed;
           save();
-          render();
+          safeRender();
         } catch (e) {
           alert("Не удалось импортировать. Проверь код или ссылку.");
         }
@@ -837,10 +852,18 @@
         }
       };
 
+      window.addEventListener("error", (event) => {
+        if (calendarEl) {
+          calendarEl.innerHTML =
+            '<div class="day" style="grid-column: 1 / -1; text-align: center;">Ошибка скрипта. Обнови страницу.</div>';
+        }
+        console.error("Window error:", event.error);
+      });
+
       load();
       handleHashSync();
       loadPinFromMeta();
-      render();
+      safeRender();
 
       if (syncState.pinHash && supabase) {
         pullFromServer();
